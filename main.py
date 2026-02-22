@@ -65,7 +65,7 @@ df = pd.DataFrame(data, columns=[
     "contrast"
 ])
 
-df.to_csv("butterfly_features.csv", index=False)
+df.to_csv("dataset.csv", index=False)
 
-print("\nHotovo. Dataset vytvořen.")
+print("\nDone.")
 print(df.head())
