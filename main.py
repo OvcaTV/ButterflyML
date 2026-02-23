@@ -18,9 +18,6 @@ for index, filename in enumerate(files, start=1):
     filepath = os.path.join(image_folder, filename)
 
     try:
-        progress = (index / total_files) * 100
-        print(f"[{index}/{total_files}] ({progress:.2f} %) Zpracovávám: {filename}")
-
         name_without_extension = os.path.splitext(filename)[0]
         species_name = name_without_extension.split("_")[0]
 
@@ -58,14 +55,14 @@ print("\nVytvářím DataFrame...")
 df = pd.DataFrame(data, columns=[
     "species",
     "filename",
-    "mean_R",
-    "mean_G",
-    "mean_B",
-    "mean_brightness",
+    "avg_R",
+    "avg_G",
+    "avg_B",
+    "avg_brightness",
     "contrast"
 ])
 
 df.to_csv("dataset.csv", index=False)
 
-print("\nDone.")
+print("\nDone! :-} :-D :-) \n yippee")
 print(df.head())
