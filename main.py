@@ -1,71 +1,105 @@
 import os
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+from PIL import Image
 
-image_folder = "ToBeAnalysed"
+# Folder with butterfly images
+IMAGE_FOLDER = "ToBeAnalysed"
 
-valid_extensions = (".jpg", ".jpeg", ".png")
+# Output dataset file
+OUTPUT_FILE = "dataset.csv"
 
-files = [f for f in os.listdir(image_folder) if f.lower().endswith(valid_extensions)]
-total_files = len(files)
 
-print(f"Nalezeno {total_files} obrázků.\n")
+def extract_filename_info(filename):
+    """
+    Extract species and position from filename:
+    Example:
+    Monarch_random_top.jpg
+
+    Species = Monarch
+    Position = top
+    """
+
+    name = os.path.splitext(filename)[0]
+    parts = name.split("_")
+
+    species = parts[0] if len(parts) > 0 else "unknown"
+    position = parts[1] if len(parts) > 1 else "unknown"
+
+    return species, position
+
+
+def analyze_image(filepath):
+
+    img = Image.open(filepath).convert("RGB")
+    img_array = np.array(img)
+
+    # Flatten pixels
+    pixels = img_array.reshape(-1, 3)
+
+    # Average color
+    avg_color = pixels.mean(axis=0)
+    avg_r, avg_g, avg_b = avg_color
+
+    # Dominant color (most common pixel)
+    colors, counts = np.unique(pixels, axis=0, return_counts=True)
+    dominant = colors[np.argmax(counts)]
+    dom_r, dom_g, dom_b = dominant
+
+    # Color contrast (standard deviation)
+    contrast = pixels.std()
+
+    # Color histogram (16 bins per channel)
+    hist_r, _ = np.histogram(pixels[:,0], bins=16, range=(0,255))
+    hist_g, _ = np.histogram(pixels[:,1], bins=16, range=(0,255))
+    hist_b, _ = np.histogram(pixels[:,2], bins=16, range=(0,255))
+
+    histogram = np.concatenate([hist_r, hist_g, hist_b])
+
+    return {
+        "avg_r": avg_r,
+        "avg_g": avg_g,
+        "avg_b": avg_b,
+        "dom_r": dom_r,
+        "dom_g": dom_g,
+        "dom_b": dom_b,
+        "contrast": contrast,
+        **{f"hist_{i}": histogram[i] for i in range(len(histogram))}
+    }
+
 
 data = []
+count = 0
 
-for index, filename in enumerate(files, start=1):
-    filepath = os.path.join(image_folder, filename)
+all_files = [f for f in os.listdir(IMAGE_FOLDER)
+             if f.lower().endswith((".jpg", ".png", ".jpeg"))]
 
-    try:
-        progress = (index / total_files) * 100
-        print(f"[{index}/{total_files}] ({progress:.2f} %) Zpracovávám: {filename}")
+total_photos = len(all_files)
 
-        name_without_extension = os.path.splitext(filename)[0]
-        species_name = name_without_extension.split("_")[0]
+print(f"Found {total_photos} images to analyze.\n")
 
-        img = plt.imread(filepath)
+for filename in all_files:
 
-        if img.shape[-1] == 4:
-            img = img[:, :, :3]
+    filepath = os.path.join(IMAGE_FOLDER, filename)
 
-        if img.dtype == np.uint8:
-            img = img.astype(np.float32)
+    species, position = extract_filename_info(filename)
+    features = analyze_image(filepath)
 
-        mean_r = np.mean(img[:, :, 0])
-        mean_g = np.mean(img[:, :, 1])
-        mean_b = np.mean(img[:, :, 2])
+    row = {
+        "image_name": filename,
+        "species": species,
+        "position": position,
+        **features
+    }
 
-        luminance = 0.299 * img[:, :, 0] + 0.587 * img[:, :, 1] + 0.114 * img[:, :, 2]
-        mean_brightness = np.mean(luminance)
-        contrast = np.std(luminance)
+    data.append(row)
 
-        data.append([
-            species_name,
-            filename,
-            mean_r,
-            mean_g,
-            mean_b,
-            mean_brightness,
-            contrast
-        ])
+    count += 1
+    print(f"Processed {count}/{total_photos}: {filename}")
 
-    except Exception as e:
-        print(f"Chyba při zpracování {filename}: {e}")
+df = pd.DataFrame(data)
+df.to_csv(OUTPUT_FILE, index=False)
 
-print("\nVytvářím DataFrame...")
-
-df = pd.DataFrame(data, columns=[
-    "species",
-    "filename",
-    "mean_R",
-    "mean_G",
-    "mean_B",
-    "mean_brightness",
-    "contrast"
-])
-
-df.to_csv("dataset.csv", index=False)
-
-print("\nDone.")
-print(df.head())
+print("\n---------------------------------")
+print(f"Finished! {count} photos analyzed.")
+print(f"Dataset saved to: {OUTPUT_FILE}")
