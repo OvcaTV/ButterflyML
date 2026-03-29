@@ -71,21 +71,21 @@ all_files = [
     f for f in os.listdir(DATA_DIR)
     if f.lower().endswith(('.jpg', '.jpeg', '.png'))
 ]
-all_paths  = [os.path.join(DATA_DIR, f) for f in all_files]
+all_paths = [os.path.join(DATA_DIR, f) for f in all_files]
 all_labels = [f.split('_')[0] for f in all_files]
 
-counts  = Counter(all_labels)
+counts = Counter(all_labels)
 dropped = [s for s, n in counts.items() if n < 2]
 if dropped:
     print(f"Dropped {len(dropped)} species with < 2 images: {dropped}")
 
-filtered   = [(p, l) for p, l in zip(all_paths, all_labels) if counts[l] >= 2]
+filtered = [(p, l) for p, l in zip(all_paths, all_labels) if counts[l] >= 2]
 all_paths, all_labels = zip(*filtered)
 
-le             = LabelEncoder()
+le = LabelEncoder()
 all_labels_enc = le.fit_transform(all_labels)
-CLASS_NAMES    = list(le.classes_)
-NUM_CLASSES    = len(CLASS_NAMES)
+CLASS_NAMES = list(le.classes_)
+NUM_CLASSES = len(CLASS_NAMES)
 
 print(f"Detected {NUM_CLASSES} species: {CLASS_NAMES}\n")
 
@@ -145,8 +145,8 @@ def make_dataset(paths, labels, training=False):
 
 
 train_ds = make_dataset(X_train, y_train, training=True)
-val_ds   = make_dataset(X_val,   y_val)
-test_ds  = make_dataset(X_test,  y_test)
+val_ds = make_dataset(X_val,   y_val)
+test_ds = make_dataset(X_test,  y_test)
 
 
 # 7.  LR SCHEDULE: COSINE DECAY WITH LINEAR WARMUP
@@ -158,10 +158,10 @@ class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
 
     def __init__(self, peak_lr, total_steps, warmup_steps, min_lr=1e-7, **kwargs):
         super().__init__(**kwargs)
-        self.peak_lr      = float(peak_lr)
-        self.total_steps  = int(total_steps)
+        self.peak_lr = float(peak_lr)
+        self.total_steps = int(total_steps)
         self.warmup_steps = int(warmup_steps)
-        self.min_lr       = float(min_lr)
+        self.min_lr = float(min_lr)
 
     def __call__(self, step):
         step     = tf.cast(step, tf.float32)
@@ -178,10 +178,10 @@ class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
 
     def get_config(self):
         return {
-            "peak_lr":      self.peak_lr,
-            "total_steps":  self.total_steps,
+            "peak_lr": self.peak_lr,
+            "total_steps": self.total_steps,
             "warmup_steps": self.warmup_steps,
-            "min_lr":       self.min_lr,
+            "min_lr": self.min_lr,
         }
 
 
@@ -239,8 +239,7 @@ def build_model(num_classes: int, img_size: tuple) -> tuple[Model, Model]:
     x = Dropout(0.3, name="drop_2")(x)
 
     # float32 output keeps softmax numerically stable under mixed precision
-    outputs = Dense(num_classes, activation="softmax",
-                    dtype="float32", name="predictions")(x)
+    outputs = Dense(num_classes, activation="softmax", dtype="float32", name="predictions")(x)
 
     model = Model(inputs=inputs, outputs=outputs, name="butterfly_classifier")
     return model, base
@@ -266,7 +265,7 @@ history_phase1 = model.fit(
     train_ds,
     validation_data=val_ds,
     epochs=P1_MAX_EPOCHS,
-    class_weight=class_weight_dict,   # ⑤
+    class_weight=class_weight_dict,
     callbacks=[
         EarlyStopping(
             monitor="val_accuracy",
