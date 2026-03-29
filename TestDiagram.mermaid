@@ -1,0 +1,73 @@
+flowchart TD
+    A([Module imported / script run]) --> B
+
+    subgraph CFG["1. Configuration Constants"]
+        B["MODEL_PATH = butterfly_model_v2.keras\nIMG_SIZE    = 384 × 384\nCONFIDENCE_THRESHOLD = 0.30"]
+    end
+
+    CFG --> CLS
+
+    subgraph CLS["2. Class Registry"]
+        C[CLASS_NAMES list\n96 Czech butterfly species\ndefined at module level]
+    end
+
+    CLS --> SCH
+
+    subgraph SCH["3. Register Custom LR Schedule"]
+        D["@register_keras_serializable\nWarmupCosineDecay\nRequired so load_model can\ndeserialise the saved optimiser"]
+    end
+
+    SCH --> LDM
+
+    subgraph LDM["4. Load Model  runs once at import"]
+        E["load_model butterfly_model_v2.keras\n_model stored as module-level variable\nso repeated calls do not reload from disk"]
+    end
+
+    LDM --> CALL
+
+    subgraph CALL["5. predict_butterfly called"]
+        F["predict_butterfly\n  image_path\n  n_tta=8\n  top_k=3\n  confidence_threshold=0.30"]
+    end
+
+    CALL --> G
+
+    subgraph GUARDS["6. Input Guards"]
+        G{CLASS_NAMES\npopulated?}
+        G -- No --> ERR1["raise ValueError\nCLASS_NAMES is empty"]
+        G -- Yes --> H{os.path.isfile\nimage_path ?}
+        H -- No --> ERR2["raise FileNotFoundError\nImage not found: path"]
+        H -- Yes --> OK[Proceed to inference]
+    end
+
+    OK --> IMG
+
+    subgraph IMG["7. Image Loading — _load_image"]
+        I[tf.io.read_file]
+        I --> J[decode_image\n3 channels · no animation]
+        J --> K[resize to 384 × 384]
+        K --> L[cast to float32\nraw 0-255 · backbone normalises internally]
+    end
+
+    IMG --> TTA
+
+    subgraph TTA["8. Test-Time Augmentation  n_tta=8 passes"]
+        M["Pass 1 — clean image\ntraining=False\nin-model aug is disabled"]
+        M --> N["Passes 2-8 — _tta_augment each\nrandom_flip_left_right\nrandom_brightness  ±8%\nrandom_contrast    ±8%\nclip_by_value 0-255"]
+        N --> O["Stack all 8 softmax outputs\nnp.mean across passes\nshape: NUM_CLASSES"]
+    end
+
+    TTA --> CONF
+
+    subgraph CONF["9. Confidence Gate"]
+        P{best_conf\n≥ threshold\n0.30 ?}
+        P -- No --> NOBUTT["Print:\nNo butterfly detected\nbest X.X% < threshold 30%\nReturn early"]
+        P -- Yes --> PRINT
+    end
+
+    subgraph PRINT["10. Print Top-K Results"]
+        Q["argsort probabilities descending\nslice top_k = 3"]
+        Q --> R["For each rank:\nspecies name  confidence%  bar chart"]
+    end
+
+    NOBUTT --> Done([Return])
+    PRINT --> Done

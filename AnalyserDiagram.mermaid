@@ -1,0 +1,92 @@
+flowchart TD
+    A([Start]) --> B
+
+    subgraph CFG["1. Configuration"]
+        B[Set DATA_DIR, IMG_SIZE,\nBATCH_SIZE, LR schedules,\nlabel smoothing, etc.]
+    end
+
+    CFG --> MP
+
+    subgraph MP["2. Mixed Precision"]
+        C[Enable mixed_float16 policy\nfloat16 compute · float32 weights]
+    end
+
+    MP --> DL
+
+    subgraph DL["3. Data Loading"]
+        D[Scan DATA_DIR for\n.jpg / .jpeg / .png files]
+        D --> E[Extract species label\nfrom filename prefix]
+        E --> F{Species has\n≥ 2 images?}
+        F -- No --> G[Drop species\nfrom dataset]
+        F -- Yes --> H[Keep image]
+        H --> I[LabelEncoder →\none-hot classes]
+    end
+
+    DL --> SP
+
+    subgraph SP["4. Train / Val / Test Split"]
+        J[Stratified split\n10% → Test set]
+        J --> K[Stratified split\n15% → Val set]
+        K --> L[Remainder → Train set]
+    end
+
+    I --> J
+
+    SP --> CW
+
+    subgraph CW["5. Class Weights"]
+        M[compute_class_weight balanced\nweight ∝ 1 / class_frequency]
+    end
+
+    CW --> DS
+
+    subgraph DS["6. data Pipeline"]
+        N[from_tensor_slices]
+        N --> O[shuffle — train only]
+        O --> P[decode · resize to 384×384\ncast to float32]
+        P --> Q[batch · prefetch AUTOTUNE]
+    end
+
+    DS --> LR
+
+    subgraph LR["7. LR Schedule — WarmupCosineDecay"]
+        R[Linear warmup\n0 → peak_lr over warmup_steps]
+        R --> S[Cosine decay\npeak_lr → min_lr over remaining steps]
+    end
+
+    LR --> MB
+
+    subgraph MB["8. Model Architecture"]
+        T[Input 384×384×3]
+        T --> U["Augmentation block ③\nFlip · Rotate · Zoom · Contrast\nauto-disabled at inference"]
+        U --> V["EfficientNetV2S backbone\npretrained ImageNet weights"]
+        V --> W[GlobalAveragePooling2D]
+        W --> X[BatchNorm]
+        X --> Y[Dense 512 · ReLU · Dropout 0.4]
+        Y --> Z[Dense 256 · ReLU · Dropout 0.3]
+        Z --> AA["Dense N_classes · Softmax\ndtype=float32 ②"]
+    end
+
+    MB --> P1
+
+    subgraph P1["9. Phase 1 — Train Head  backbone frozen"]
+        AB[Compile: Adam + LossScaleOptimizer ②\nCategoricalCrossentropy + label_smoothing ⑥]
+        AB --> AC["model.fit up to 100 epochs\nclass_weight=class_weight_dict ⑤"]
+        AC --> AD{EarlyStopping\nval_accuracy\npatience=12}
+        AD -- No improvement --> AE[Restore best weights]
+        AD -- Still improving --> AC
+    end
+
+    AE --> P2
+
+    subgraph P2["10. Phase 2 — Fine-Tune  top 40 backbone layers unfrozen"]
+        AF[Unfreeze top N_FINE_TUNE layers\nof EfficientNetV2S]
+        AF --> AG[Recompile: much lower LR 3e-5\nsame loss + label smoothing]
+        AG --> AH["model.fit up to 80 epochs\nclass_weight=class_weight_dict"]
+        AH --> AI{EarlyStopping\nval_accuracy\npatience=12}
+        AI -- No improvement --> AJ[Restore best weights]
+        AI -- Still improving --> AH
+    end
+
+    AJ --> SV["Save model\nbutterfly_model_v2.keras"]
+    SV --> Done
