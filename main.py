@@ -1,105 +1,223 @@
 import os
 import numpy as np
-import pandas as pd
-from PIL import Image
+import tensorflow as tf
+from keras.models import load_model
 
-# Folder with butterfly images
-IMAGE_FOLDER = "ToBeAnalysed"
+# Konfigurace
 
-# Output dataset file
-OUTPUT_FILE = "dataset.csv"
+MODEL_PATH = "motyliModel.keras"
+IMG_SIZE   = (384, 384)
+CONFIDENCE_THRESHOLD  = 0.30
 
 
-def extract_filename_info(filename):
+CLASS_NAMES = ['BabockaAdmiral',
+               'BabockaBileC',
+               'BabockaBodlakov',
+               'BabockaBodlakova',
+               'BabockaKoprivova',
+               'BabockaPaviOko',
+               'BabockaSitkovana',
+               'BatolecCerveny',
+               'BatolecDuhovy',
+               'BekyneVelkohlava',
+               'BekyneZlatoritna',
+               'Belasek',
+               'BelasekHrachorovy',
+               'BelasekOvocny',
+               'BelasekRepkovy',
+               'BelasekRepovy',
+               'BelasekRerichovy',
+               'BelasekRezedkovy',
+               'BelasekZelny',
+               'BeloskvrnacLisejnkovy',
+               'BeloskvrnacPampelskovy',
+               'HnedasekJitroceloy',
+               'HnedasekRozraziloy',
+               'LisejnikovecVroubny',
+               'ModrasekCernolemy',
+               'ModrasekJehlicovy',
+               'ModrasekKrusinovy',
+               'ModrasekPodobny',
+               'ModrasekStirovnikvy',
+               'ModrasekTmavohned',
+               'ModrasekUslechtil',
+               'ModrasekVikvicovy',
+               'OhnivacekCelikovy',
+               'OhnivacekCernocary',
+               'OhnivacekCernokrily',
+               'OhnivacekCernoskvnny',
+               'OhnivacekModrolem',
+               'OhnivacekModrolesly',
+               'Okac',
+               'OkacBojinkovy',
+               'OkacCernohnedy',
+               'OkacJecminkovy',
+               'OkacLucni',
+               'OkacOvsovy',
+               'OkacPohankovy',
+               'OkacProsickovy',
+               'OkacPyrovy',
+               'OkacRudopasny',
+               'OkacTreslicovy',
+               'OkacZedni',
+               'OstruhacekJilmovy',
+               'OtakarekFenyklovy',
+               'OtakarekOvocny',
+               'OtakarekOvocnyMlySedlec',
+               'Papilio Memnon',
+               'PapilioDemoleus',
+               'PapilioLowi',
+               'PapilioMemnon',
+               'PapilioPalinurus',
+               'PapilioPolytes',
+               'Perletovec',
+               'PerletovecFialkov',
+               'PerletovecKoprivoy',
+               'PerletovecMaly',
+               'PerletovecNejmens',
+               'PerletovecOstruziovy',
+               'PerletovecProstreni',
+               'PerletovecStribroasek',
+               'PerletovecStribroasekValestina',
+               'PerletovecVelky',
+               'PrastevnikChrastacovy',
+               'PrastevnikHluchavovy',
+               'PrastevnikJitroceovy',
+               'PrastevnikKostivaovy',
+               'PrastevnikStarckoy',
+               'Soumracik',
+               'Soumracnik',
+               'SoumracnikCareckoany',
+               'SoumracnikCernohndy',
+               'SoumracnikJitroceovy',
+               'SoumracnikMakovy',
+               'SoumracnikMetlicoy',
+               'SoumracnikRezavy',
+               'SoumracnikSlezovy)',
+               'VretenukaObecna',
+               'Vretenuska',
+               'VretenuskaCicorkoa',
+               'VretenuskaKozincoa',
+               'VretenuskaLigrusoa',
+               'VretenuskaMateriduskova',
+               'VretenuskaObecna',
+               'VretenuskaPetiteca',
+               'VretenuskaPozdni',
+               'VretenuskaPrehlizna',
+               'Zelenacek',
+               'ZelenacekStovikov',
+               'ZlutasekBoruvkovy)',
+               'ZlutasekCicoreckoy',
+               'ZlutasekCilimnikoy',
+               'ZlutasekResetlakoy'
+               ]
+
+
+@tf.keras.utils.register_keras_serializable(package="butterfly")
+class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, peak_lr, total_steps, warmup_steps, min_lr=1e-7, name=None):
+        super().__init__()
+        self.peak_lr = peak_lr
+        self.total_steps = total_steps
+        self.warmup_steps = warmup_steps
+        self.min_lr = min_lr
+        self.name = name
+
+    def __call__(self, step):
+        step = tf.cast(step, tf.float32)
+        if step < self.warmup_steps:
+            # Linear warmup
+            scale = step / self.warmup_steps
+            lr = self.min_lr + (self.peak_lr - self.min_lr) * scale
+        else:
+            # Cosine decay
+            progress = (step - self.warmup_steps) / (self.total_steps - self.warmup_steps)
+            cosine_decay = 0.5 * (1 + tf.cos(np.pi * progress))
+            lr = self.min_lr + (self.peak_lr - self.min_lr) * cosine_decay
+        return lr
+
+    def get_config(self):
+        return {
+            "peak_lr": self.peak_lr,
+            "total_steps": self.total_steps,
+            "warmup_steps": self.warmup_steps,
+            "min_lr": self.min_lr,
+            "name": self.name,
+        }
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+
+
+#nacteni modelu
+print(f"Nacitam model: {MODEL_PATH} ...")
+_model = load_model(MODEL_PATH)
+print("Model nacten.\n")
+
+
+def _load_image(image_path: str) -> tf.Tensor:
+    raw = tf.io.read_file(image_path)
+    img = tf.image.decode_image(raw, channels=3, expand_animations=False)
+    img = tf.image.resize(img, IMG_SIZE)
+    return tf.cast(img, tf.float32)  # raw [0, 255] — backbone normalises internally
+
+
+def _tta_augment(img: tf.Tensor) -> tf.Tensor:
+    img = tf.image.random_flip_left_right(img)
+    img = tf.image.random_brightness(img, max_delta=0.08 * 255)
+    img = tf.image.random_contrast(img, lower=0.92, upper=1.08)
+    return tf.clip_by_value(img, 0.0, 255.0)
+
+
+def predict_butterfly(image_path: str,n_tta: int = 8,top_k: int = 3,confidence_threshold: float = CONFIDENCE_THRESHOLD,) -> None:
     """
-    Extract species and position from filename:
-    Example:
-    Monarch_random_top.jpg
-
-    Species = Monarch
-    Position = top
+    Parametry
+    image_path: umisteni obrazku, duh (JPEG or PNG)
+    n_tta : number of forward passes to average (1 = no TTA, faster)
+    top_k : kolik nejlepsich vysledku vypsat
+    confidence_threshold : jak moc si musi byt model minimalne jisty druhem motyla
     """
 
-    name = os.path.splitext(filename)[0]
-    parts = name.split("_")
+    if not CLASS_NAMES:
+        raise ValueError(
+            "CLASS_NAMES is empty. Open this file and paste your species list "
+            "from the training output into the CLASS_NAMES list at the top."
+        )
 
-    species = parts[0] if len(parts) > 0 else "unknown"
-    position = parts[1] if len(parts) > 1 else "unknown"
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"Obrazek nenalezen: '{image_path}, vyzkousej jine umisteni'\n")
 
-    return species, position
+    img = _load_image(image_path)
 
+    # Pass 1: clean image -- in-model augmentation is off (training=False)
+    passes = [_model(img[tf.newaxis], training=False).numpy()]
 
-def analyze_image(filepath):
+    # Passes 2-n: lightly augmented versions
+    for _ in range(n_tta - 1):
+        passes.append(_model(_tta_augment(img)[tf.newaxis], training=False).numpy())
 
-    img = Image.open(filepath).convert("RGB")
-    img_array = np.array(img)
+    avg_probs = np.mean(passes, axis=0)[0]
+    top_idx = np.argsort(avg_probs)[::-1][:top_k]
+    best_conf = avg_probs[top_idx[0]]
 
-    # Flatten pixels
-    pixels = img_array.reshape(-1, 3)
-
-    # Average color
-    avg_color = pixels.mean(axis=0)
-    avg_r, avg_g, avg_b = avg_color
-
-    # Dominant color (most common pixel)
-    colors, counts = np.unique(pixels, axis=0, return_counts=True)
-    dominant = colors[np.argmax(counts)]
-    dom_r, dom_g, dom_b = dominant
-
-    # Color contrast (standard deviation)
-    contrast = pixels.std()
-
-    # Color histogram (16 bins per channel)
-    hist_r, _ = np.histogram(pixels[:,0], bins=16, range=(0,255))
-    hist_g, _ = np.histogram(pixels[:,1], bins=16, range=(0,255))
-    hist_b, _ = np.histogram(pixels[:,2], bins=16, range=(0,255))
-
-    histogram = np.concatenate([hist_r, hist_g, hist_b])
-
-    return {
-        "avg_r": avg_r,
-        "avg_g": avg_g,
-        "avg_b": avg_b,
-        "dom_r": dom_r,
-        "dom_g": dom_g,
-        "dom_b": dom_b,
-        "contrast": contrast,
-        **{f"hist_{i}": histogram[i] for i in range(len(histogram))}
-    }
+    print(f"Odhad pro: {image_path}")
+    print("-" * 55)
 
 
-data = []
-count = 0
+    if best_conf < confidence_threshold:
+        print("Na obrazku nebyl detekovan motyl")
+        return
 
-all_files = [f for f in os.listdir(IMAGE_FOLDER)
-             if f.lower().endswith((".jpg", ".png", ".jpeg"))]
+    for rank, idx in enumerate(top_idx, 1):
+        confidence = avg_probs[idx] * 100
+        bar = "|" * int(confidence / 5)
+        print(f"  {rank}. {CLASS_NAMES[idx]:<35} {confidence:5.1f}%  {bar}")
+    print()
 
-total_photos = len(all_files)
 
-print(f"Found {total_photos} images to analyze.\n")
 
-for filename in all_files:
+# Pouze tohle se mění
 
-    filepath = os.path.join(IMAGE_FOLDER, filename)
-
-    species, position = extract_filename_info(filename)
-    features = analyze_image(filepath)
-
-    row = {
-        "image_name": filename,
-        "species": species,
-        "position": position,
-        **features
-    }
-
-    data.append(row)
-
-    count += 1
-    print(f"Processed {count}/{total_photos}: {filename}")
-
-df = pd.DataFrame(data)
-df.to_csv(OUTPUT_FILE, index=False)
-
-print("\n---------------------------------")
-print(f"Finished! {count} photos analyzed.")
-print(f"Dataset saved to: {OUTPUT_FILE}")
+if __name__ == "__main__":
+    predict_butterfly("TestFotky/IMG_20260314_112917.jpg")
