@@ -1,9 +1,9 @@
 """
 Vzhled slozky s fotografiema
   <DATA_DIR>/
-      SpeciesA_photo001.jpg
-      SpeciesA_photo002.jpg
-      SpeciesB_photo001.jpg
+      DruhA_photo001.jpg
+      DruhA_photo002.jpg
+      DruhB_photo001.jpg
       atd...
 """
 
@@ -29,37 +29,32 @@ from sklearn.utils.class_weight import compute_class_weight
 
 # 1.  CONFIGURATION
 
-DATA_DIR = "ToBeAnalysed"   # folder with all butterfly photos
-IMG_SIZE = (384, 384)      # EfficientNetV2S native resolution
-BATCH_SIZE = 128              # needs to be large enough to cover many of the 100
-                             # classes per batch — 64 minimum, 128 if VRAM allows
-SEED = 1
-MODEL_PATH = "butterfly_model_v2.keras"
+DATA_DIR   = "drive/MyDrive/ReducedSize" # slozka s fotografiema
+IMG_SIZE   = (384, 384) # Rozliseni obrazku
+BATCH_SIZE = 128
 
-VAL_SPLIT = 0.15
+SEED       = 1
+MODEL_PATH = "drive/MyDrive/motyliModel.keras"
+
+VAL_SPLIT  = 0.15
 TEST_SPLIT = 0.10
 
-# Learning rate schedule
-# P1_LR → 1e-3: with 100 classes and noisy gradients,
-P1_LR = 1e-3   # phase 1 peak LR  (head only, backbone frozen)
-P2_LR = 3e-5   # phase 2 peak LR  (fine-tuning top layers)
-P1_MAX_EPOCHS = 100     # more epochs to compensate for slower, steadier LR
+P1_LR = 0.001   # learning rate ve fazi 1 - jak rychle se uci (0.001x se meni vaha o )
+P2_LR = 0.00003   # learning rate ve fazi 2 - backbone se musi ucit pomaleji pro lepsi
+P1_MAX_EPOCHS = 100
 P2_MAX_EPOCHS = 80
-WARMUP_EPOCHS = 5      # longer warmup smooths out early instability
-ES_PATIENCE = 12     # slightly more patience since convergence is slower
+WARMUP_EPOCHS = 5
+ES_PATIENCE = 12 # kolik max bez zlepseni beru
 
 LABEL_SMOOTHING = 0.05
-N_FINE_TUNE     = 40    # how many top backbone layers to unfreeze in phase 2
+N_FINE_TUNE     = 40    # kolik
 
 AUTOTUNE = tf.data.AUTOTUNE
 
 
 # 2.  MIXED PRECISION
-
 # Tensors are computed in float16, weights stored in float32.
-# Requires an Nvidia GPU with compute capability ≥ 7.0 (Volta / Turing /
-# Ampere / Ada).  On CPU or older GPUs, comment this line out — it will
-# still run correctly but give no speedup.
+
 
 tf.keras.mixed_precision.set_global_policy("mixed_float16")
 print(f"Mixed precision policy: {tf.keras.mixed_precision.global_policy().name}\n")
@@ -104,9 +99,8 @@ X_train, X_val, y_train, y_val = train_test_split(
 print(f"Train: {len(X_train)} | Val: {len(X_val)} | Test: {len(X_test)}\n")
 
 
-# 5.  CLASS WEIGHTS
-# "balanced" gives weight ∝ 1 / class_frequency, so rare species contribute
-# the same total gradient as common ones.
+# 5.  vaha druhu - druh s mene fotkama bude mit stejnou vahu jako druh s mnoha fotkama
+
 
 class_weights_arr = compute_class_weight(
     class_weight="balanced",
@@ -117,17 +111,13 @@ class_weight_dict = dict(enumerate(class_weights_arr))
 print("Class weights:", {CLASS_NAMES[k]: f"{v:.2f}" for k, v in class_weight_dict.items()}, "\n")
 
 # 6.  tf.data PIPELINE
-# Augmentation lives inside the model (see section 8), so the pipeline only
-# handles loading, resizing, and normalisation.
 
 def preprocess(path, label):
     raw = tf.io.read_file(path)
     img = tf.image.decode_image(raw, channels=3, expand_animations=False)
     img = tf.image.resize(img, IMG_SIZE)
     # EfficientNetV2S includes its own preprocessing layer internally
-    # (include_preprocessing=True by default).  Pass raw [0, 255] float values
-    # and let the backbone rescale — dividing by 255 here would double-normalise
-    # and collapse all activations to near-zero.
+
     img = tf.cast(img, tf.float32)
     label = tf.one_hot(label, NUM_CLASSES)
     return img, label
@@ -150,8 +140,6 @@ test_ds = make_dataset(X_test,  y_test)
 
 
 # 7.  LR SCHEDULE: COSINE DECAY WITH LINEAR WARMUP
-# @register_keras_serializable makes the class discoverable when loading a
-# saved model without manually passing custom_objects every time.
 
 @tf.keras.utils.register_keras_serializable(package="butterfly")
 class WarmupCosineDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
@@ -199,16 +187,7 @@ p2_schedule = WarmupCosineDecay(
 )
 
 
-# 8.  MODEL
 
-# Architecture:
-#   Input → [Augmentation block] → EfficientNetV2S → GAP → BN → Dense(512)
-#        → Dropout → Dense(256) → Dropout → Softmax
-#
-# The augmentation block uses standard Keras preprocessing layers.  Keras
-# knows how to serialise these correctly, avoiding the EagerTensor JSON error.
-# More importantly, Keras automatically disables them when the model is called
-# with training=False — no manual flag management needed.
 
 def build_model(num_classes: int, img_size: tuple) -> tuple[Model, Model]:
     inputs = tf.keras.Input(shape=(*img_size, 3), name="image_input")
